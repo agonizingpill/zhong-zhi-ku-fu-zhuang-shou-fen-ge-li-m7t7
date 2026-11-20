@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 from pydantic import BaseModel,Field,model_validator
 class Login(BaseModel):
     email:str
@@ -46,8 +47,16 @@ class PollenInput(BaseModel):
     mother_lot_id:int
     father_lot_id:int
     bag_code:str=Field(min_length=3,max_length=60)
-    bagged:bool
+    bag_material:Literal['paper','nonwoven','nylon']
+    bag_since:date
     flowers:int=Field(ge=1,le=10000)
+class BagCheckInput(BaseModel):
+    pollination_id:int
+    code:str=Field(min_length=3,max_length=60)
+    check_date:date
+    result:Literal['pass','fail']
+class BagClaimInput(BaseModel):
+    check_date:date|None=None
 class HarvestInput(BaseModel):
     regeneration_id:int
     code:str=Field(min_length=3,max_length=60)

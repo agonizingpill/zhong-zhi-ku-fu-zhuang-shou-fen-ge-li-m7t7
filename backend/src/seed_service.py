@@ -19,6 +19,18 @@ def seed():
         for i in range(18):
             code=chr(65+i//6)+str(i%6+1)
             if not s.scalar(select(Plot).where(Plot.code==code)):s.add(Plot(code=code,row=i//6,position=i%6,capacity=250))
+        for material,available in (('paper',120),('nonwoven',80),('nylon',60)):
+            if not s.scalar(select(BagStock).where(BagStock.material==material)):s.add(BagStock(material=material,available=available))
         s.flush();lot=s.scalar(select(Lot).where(Lot.code=='QH-021-G3'))
         if not s.scalar(select(GerminationTest).where(GerminationTest.code=='GT-SEED-80')):s.add(GerminationTest(lot_id=lot.id,code='GT-SEED-80',sampled=100,germinated=80,state='recorded'))
-        s.commit();return {cls.__tablename__:s.scalar(select(func.count()).select_from(cls))for cls in (User,Accession,Lot,GerminationTest,Regeneration,Plot,Flowering,Pollination,Harvest,Distribution)}
+        # 历史封口检查（未绑定授粉单）作为风险拟合样本；按检查编号只补缺，不覆盖人工记录。
+        history=[('BC-H-01','paper',46,0,'fail'),('BC-H-02','paper',12,0,'pass'),('BC-H-03','nonwoven',38,1,'fail'),
+                 ('BC-H-04','nonwoven',9,0,'pass'),('BC-H-05','nylon',51,0,'fail'),('BC-H-06','nylon',16,1,'pass'),
+                 ('BC-H-07','paper',29,1,'fail'),('BC-H-08','paper',5,0,'pass'),('BC-H-09','nonwoven',22,0,'fail'),
+                 ('BC-H-10','nonwoven',33,1,'fail'),('BC-H-11','nylon',7,0,'pass'),('BC-H-12','nylon',27,1,'fail'),
+                 ('BC-H-13','paper',19,0,'fail'),('BC-H-14','nonwoven',3,0,'pass')]
+        for code,material,days,prior,result in history:
+            if not s.scalar(select(BagCheck).where(BagCheck.code==code)):
+                s.add(BagCheck(pollination_id=None,code=code,bag_code='ARCHIVE-'+code,material=material,check_date='2026-10-01',
+                               days_in_field=days,prior_checks=prior,result=result,risk=None,model=None))
+        s.commit();return {cls.__tablename__:s.scalar(select(func.count()).select_from(cls))for cls in (User,Accession,Lot,GerminationTest,Regeneration,Plot,Flowering,Pollination,BagStock,BagCheck,BagReplacement,Harvest,Distribution)}

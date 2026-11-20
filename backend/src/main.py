@@ -10,7 +10,7 @@ from .models import *
 from .schemas import *
 from .auth import current,writer,supervisor,verify,token
 from .common import pack,lock,add,audit
-from . import renewal_service as renewal,isolation_service as isolation,harvest_service as harvest,sharing_service as sharing
+from . import renewal_service as renewal,isolation_service as isolation,harvest_service as harvest,sharing_service as sharing,bag_service as bags
 from .middleware import Trace,Burst
 queue=redis.Redis.from_url(os.environ['REDIS_URL'],decode_responses=True)
 @asynccontextmanager
@@ -31,7 +31,7 @@ def login(d:Login,s=Depends(session)):
 def me(u=Depends(current)):return {'email':u.email,'role':u.role}
 @app.get('/archive')
 def archive(s=Depends(session),u=Depends(current)):
-    return {cls.__tablename__:[pack(x)for x in s.scalars(select(cls).order_by(cls.id))]for cls in (Accession,Lot,GerminationTest,Regeneration,Plot,Flowering,Pollination,Harvest,Distribution)}
+    return {cls.__tablename__:[pack(x)for x in s.scalars(select(cls).order_by(cls.id))]for cls in (Accession,Lot,GerminationTest,Regeneration,Plot,Flowering,Pollination,BagStock,BagCheck,BagReplacement,Harvest,Distribution)}|{'bag_risk':bags.model_for(s)}
 @app.get('/audits')
 def audits(s=Depends(session),u=Depends(current)):return [pack(x)for x in s.scalars(select(Audit).order_by(Audit.id.desc()).limit(50))]
 @app.post('/accessions')
@@ -85,6 +85,17 @@ def edit_pollen(id:int,d:PollenInput,s=Depends(session),u=Depends(writer)):
 @app.post('/pollinations/{id}/pollinate')
 def pollinate(id:int,s=Depends(session),u=Depends(supervisor)):
     x=isolation.pollinate(s,id,u);s.commit();return x
+@app.get('/bag-risk')
+def bag_risk(s=Depends(session),u=Depends(current)):
+    model=bags.model_for(s)
+    return {'model':model,'stock':[pack(x)for x in s.scalars(select(BagStock).order_by(BagStock.material))],
+            'queue':[pack(x)for x in s.scalars(select(BagReplacement).where(BagReplacement.state.in_(('queued','claimed'))).order_by(BagReplacement.state,BagReplacement.reserve_seq,BagReplacement.id))]}
+@app.post('/bag-checks')
+def bag_check(d:BagCheckInput,s=Depends(session),u=Depends(writer)):
+    x=bags.inspect(s,d,u);s.commit();return x
+@app.post('/bag-replacements/{id}/claim')
+def bag_claim(id:int,d:BagClaimInput|None=None,s=Depends(session),u=Depends(writer)):
+    x=bags.claim(s,id,u,d.check_date if d else None);s.commit();return x
 @app.post('/harvests')
 def harvested(d:HarvestInput,s=Depends(session),u=Depends(writer)):
     x=harvest.save(s,d,u);s.commit();return x

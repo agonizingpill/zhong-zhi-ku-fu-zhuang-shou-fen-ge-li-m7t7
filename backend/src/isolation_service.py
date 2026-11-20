@@ -2,6 +2,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from .models import Plot,Flowering,Regeneration,Lot,Accession,Pollination
 from .common import lock,pack,add,audit
+from .bag_risk import MATERIALS
+from . import bag_service as bags
 
 def save(s,d,u,id=None):
     r=lock(s,Regeneration,d.regeneration_id)
@@ -42,20 +44,32 @@ def prepare(s,d,u,id=None):
     if not mother or not father:raise HTTPException(404,'亲本种批不存在')
     if mother.id!=r.lot_id or mother.accession_id!=father.accession_id or mother.generation!=father.generation:raise HTTPException(409,'母本须为领种批，父本须同种质同代次；复壮不接受异源杂交')
     if d.flowers>r.issued:raise HTTPException(409,'授粉花数不能超过领种株数')
+    if d.bag_material not in MATERIALS:raise HTTPException(422,'袋材须为'+'、'.join(MATERIALS))
     x=lock(s,Pollination,id) if id else None
     if x and (x.regeneration_id!=r.id or x.state!='prepared'):raise HTTPException(409,'授粉后不可覆盖亲本或袋签')
+    data=d.model_dump()
+    if data['bag_since']:data['bag_since']=data['bag_since'].isoformat()
+    changed=True
     if x:
-        for k,v in d.model_dump().items():setattr(x,k,v)
-    else:x=Pollination(**d.model_dump());s.add(x)
-    s.flush();audit(s,u,'登记亲本与套袋 '+d.bag_code);return pack(x)
+        # 改袋签、袋材或套袋日会令旧袋签的检查不再授权授粉，清空套袋标记待复检。
+        changed=(x.bag_code!=data['bag_code'] or x.bag_since!=data['bag_since'] or x.bag_material!=data['bag_material'])
+        if (x.bag_code!=data['bag_code'] or x.bag_material!=data['bag_material']) and bags.latest(s,x.id,x.bag_code):
+            # 已有封口检查的袋签不能手工改签或改袋材，换袋必须走换袋队列领新袋并扣库存。
+            raise HTTPException(409,'该袋签已有封口检查，换袋须走换袋队列领新袋，不可手改袋签或袋材')
+        for k,v in data.items():setattr(x,k,v)
+    else:x=Pollination(**data);s.add(x)
+    x.bagged=False if changed else x.bagged
+    s.flush();audit(s,u,'登记亲本与套袋 '+data['bag_code']);return pack(x)
 
 def pollinate(s,id,u):
     pre=s.get(Pollination,id)
     if not pre:raise HTTPException(404,'授粉记录不存在')
-    # 与prepare保持同一锁序：复壮根记录 → 授粉记录。
+    # 与prepare/换袋保持同一锁序：复壮根记录 → 授粉记录。
     r=lock(s,Regeneration,pre.regeneration_id);x=lock(s,Pollination,id)
     if x.state!='prepared' or r.state!='issued':raise HTTPException(409,'授粉不可重复')
-    if not x.bagged:raise HTTPException(409,'先补充授粉袋隔离检查，未套袋不能授粉')
+    # 换袋与授粉确认并发时，按当前袋签取最近一次检查；旧袋签的合格检查不作数。
+    check=bags.current_check(s,x)
     mother=s.get(Lot,x.mother_lot_id);father=s.get(Lot,x.father_lot_id)
     if mother.id!=r.lot_id or mother.accession_id!=father.accession_id or mother.generation!=father.generation:raise HTTPException(409,'亲本代次或种质不符')
+    x.seal_snapshot=bags.seal_snapshot(s,x,check)
     x.state='pollinated';audit(s,u,'主管确认隔离授粉 '+x.bag_code);return pack(x)

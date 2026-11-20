@@ -69,9 +69,43 @@ class Pollination(Base):
     mother_lot_id:Mapped[int]=mapped_column(ForeignKey('lots.id'))
     father_lot_id:Mapped[int]=mapped_column(ForeignKey('lots.id'))
     bag_code:Mapped[str]=mapped_column(String(60),unique=True)
+    bag_material:Mapped[str|None]=mapped_column(String(20),nullable=True)
+    bag_since:Mapped[str|None]=mapped_column(String(10),nullable=True)
     bagged:Mapped[bool]=mapped_column(default=False)
     flowers:Mapped[int]=mapped_column(Integer)
     state:Mapped[str]=mapped_column(String(20),default='prepared')
+    seal_snapshot:Mapped[dict|None]=mapped_column(JSON,nullable=True)
+class BagStock(Base):
+    __tablename__='bag_stocks'
+    __table_args__=(CheckConstraint('available >= 0'),)
+    id:Mapped[int]=mapped_column(primary_key=True)
+    material:Mapped[str]=mapped_column(String(20),unique=True)
+    available:Mapped[int]=mapped_column(Integer)
+class BagCheck(Base):
+    __tablename__='bag_checks'
+    id:Mapped[int]=mapped_column(primary_key=True)
+    pollination_id:Mapped[int|None]=mapped_column(ForeignKey('pollinations.id'),nullable=True)
+    code:Mapped[str]=mapped_column(String(60),unique=True)
+    bag_code:Mapped[str]=mapped_column(String(60))
+    material:Mapped[str]=mapped_column(String(20))
+    check_date:Mapped[str]=mapped_column(String(10))
+    days_in_field:Mapped[int]=mapped_column(Integer)
+    prior_checks:Mapped[int]=mapped_column(Integer)
+    result:Mapped[str]=mapped_column(String(10))
+    risk:Mapped[float|None]=mapped_column(Float,nullable=True)
+    model:Mapped[dict|None]=mapped_column(JSON,nullable=True)
+class BagReplacement(Base):
+    __tablename__='bag_replacements'
+    id:Mapped[int]=mapped_column(primary_key=True)
+    code:Mapped[str]=mapped_column(String(60),unique=True)
+    pollination_id:Mapped[int]=mapped_column(ForeignKey('pollinations.id'))
+    check_id:Mapped[int]=mapped_column(ForeignKey('bag_checks.id'),unique=True)
+    material:Mapped[str]=mapped_column(String(20))
+    old_bag_code:Mapped[str]=mapped_column(String(60))
+    risk:Mapped[float|None]=mapped_column(Float,nullable=True)
+    state:Mapped[str]=mapped_column(String(20),default='queued')
+    reserve_seq:Mapped[int|None]=mapped_column(Integer,nullable=True)
+    new_bag_code:Mapped[str|None]=mapped_column(String(60),nullable=True)
 class Harvest(Base):
     __tablename__='harvests'
     id:Mapped[int]=mapped_column(primary_key=True)
